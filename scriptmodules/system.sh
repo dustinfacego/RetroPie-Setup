@@ -208,16 +208,18 @@ function get_retropie_depends() {
 function get_rpi_video() {
     local pkgconfig="/opt/vc/lib/pkgconfig"
 
+    if [[ -z "$__has_kms" && "$__chroot" -eq 1 ]]; then
+        # in chroot, use kms by default for rpi4 target
+        isPlatform "rpi4" && __has_kms=1
+    fi
+
     # detect driver via inserted module / platform driver setup
-    if [[ -d "/sys/module/vc4" ]]; then
+    if [[ -d "/sys/module/vc4" || "$__has_kms" -eq 1 ]]; then
         __platform_flags+=" mesa kms"
         [[ "$(ls -A /sys/bus/platform/drivers/vc4_firmware_kms/*.firmwarekms 2>/dev/null)" ]] && __platform_flags+=" dispmanx"
     else
         __platform_flags+=" videocore dispmanx"
     fi
-
-    # use our supplied fallback pkgconfig if necessary
-    [[ ! -d "$pkgconfig" ]] && pkgconfig="$scriptdir/pkgconfig"
 
     # set pkgconfig path for vendor libraries
     export PKG_CONFIG_PATH="$pkgconfig"
@@ -245,6 +247,9 @@ function get_platform() {
                             ;;
                         2)
                             __platform="rpi3"
+                            ;;
+                        3)
+                            __platform="rpi4"
                             ;;
                     esac
                 fi
@@ -284,6 +289,14 @@ function get_platform() {
         fatalError "Unknown platform - please manually set the __platform variable to one of the following: $(compgen -A function platform_ | cut -b10- | paste -s -d' ')"
     fi
 
+    # check if we wish to target kms for platform
+    if [[ -z "$__has_kms" ]]; then
+        iniConfig " = " '"' "$configdir/all/retropie.cfg"
+        iniGet "force_kms"
+        [[ "$ini_value" == 1 ]] && __has_kms=1
+        [[ "$ini_value" == 0 ]] && __has_kms=0
+    fi
+
     platform_${__platform}
     [[ -z "$__default_cxxflags" ]] && __default_cxxflags="$__default_cflags"
 }
@@ -314,6 +327,13 @@ function platform_rpi3() {
     __default_asflags=""
     __default_makeflags="-j2"
     __platform_flags="arm armv8 neon rpi gles"
+}
+
+function platform_rpi4() {
+    __default_cflags="-O2 -march=armv8-a+crc -mtune=cortex-a72 -mfpu=neon-fp-armv8 -mfloat-abi=hard -ftree-vectorize -funsafe-math-optimizations"
+    __default_asflags=""
+    __default_makeflags="-j2"
+    __platform_flags="arm armv8 neon rpi gles gles3"
 }
 
 function platform_odroid-c1() {
@@ -359,7 +379,12 @@ function platform_x86() {
     __default_cflags="-O2 -march=native"
     __default_asflags=""
     __default_makeflags="-j$(nproc)"
-    __platform_flags="x11 gl"
+    __platform_flags="gl"
+    if [[ "$__has_kms" -eq 1 ]]; then
+        __platform_flags+=" kms"
+    else
+        __platform_flags+=" x11"
+    fi
 }
 
 function platform_generic-x11() {
